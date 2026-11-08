@@ -12,6 +12,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
@@ -31,7 +32,6 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
 
     @Override
     public void onEnable() {
-        // Klasör ve dosya oluşturma
         if (!getDataFolder().exists()) getDataFolder().mkdirs();
         
         fiyatDosya = new File(getDataFolder(), "fiyatlar.yml");
@@ -40,7 +40,6 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
         }
         fiyatYml = YamlConfiguration.loadConfiguration(fiyatDosya);
 
-        // Vault Ekonomi Bağlantısı
         if (getServer().getPluginManager().getPlugin("Vault") != null) {
             RegisteredServiceProvider<Economy> rsp = getServer().getServicesManager().getRegistration(Economy.class);
             if (rsp != null) econ = rsp.getProvider();
@@ -61,13 +60,11 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
     public void menuAc(Player p) {
         Inventory inv = Bukkit.createInventory(null, 54, "§8§l» §6§lEŞYA SAT §8§l«");
         
-        // Alt kısımdaki siyah camlar
         ItemStack cam = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
         ItemMeta cm = cam.getItemMeta(); 
         if (cm != null) { cm.setDisplayName(" "); cam.setItemMeta(cm); }
         for (int i = 45; i < 54; i++) inv.setItem(i, cam);
 
-        // SAT Butonu
         ItemStack sat = new ItemStack(Material.LIME_STAINED_GLASS_PANE);
         ItemMeta sMeta = sat.getItemMeta();
         if (sMeta != null) {
@@ -79,7 +76,6 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
         }
         inv.setItem(49, sat);
 
-        // Kapat Butonu
         ItemStack iptal = new ItemStack(Material.BARRIER);
         ItemMeta iMeta = iptal.getItemMeta();
         if (iMeta != null) { iMeta.setDisplayName("§c§lKAPAT"); iptal.setItemMeta(iMeta); }
@@ -90,29 +86,45 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
         p.sendMessage("§eSatmak istediğin eşyaları üst kısma koy ve §aSAT §ebutonuna bas!");
     }
 
+    // --- DÜZELTME: Fareyle Eşya Sürüklemeyi (Drag) Engelleme ---
+    @EventHandler
+    public void onDrag(InventoryDragEvent e) {
+        if (!(e.getWhoClicked() instanceof Player p)) return;
+        if (!e.getView().getTitle().equals("§8§l» §6§lEŞYA SAT §8§l«")) return;
+
+        // Sadece alt kısımdaki (45 ve üstü) butonlara sürüklemeyi engelle, üst kısma (0-44) izin ver
+        for (int slot : e.getRawSlots()) {
+            if (slot >= 45) {
+                e.setCancelled(true);
+                return;
+            }
+        }
+    }
+
     @EventHandler
     public void onClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player p)) return;
         if (!e.getView().getTitle().equals("§8§l» §6§lEŞYA SAT §8§l«")) return;
 
-        // Oyuncu kendi envanterine tıklıyorsa serbest bırak (eşya koyabilsin)
+        // Oyuncu kendi envanterine tıklıyorsa serbest bırak
         if (e.getClickedInventory() == null || e.getClickedInventory().equals(e.getView().getBottomInventory())) {
             return;
         }
 
         ItemStack clicked = e.getCurrentItem();
-        if (clicked == null) {
-            e.setCancelled(true);
+        
+        // Eğer üst menüdeki boş bir yere tıklıyorsa, eşya koymasına izin ver
+        if (clicked == null || clicked.getType() == Material.AIR) {
             return;
         }
 
-        // Üst menüdeki butonlara tıklamayı engelle
+        // Eğer butonlara tıklıyorsa iptal et
         if (clicked.getType() == Material.BLACK_STAINED_GLASS_PANE || 
             clicked.getType() == Material.LIME_STAINED_GLASS_PANE || 
             clicked.getType() == Material.BARRIER) {
             e.setCancelled(true);
         } else {
-            return; 
+            return; // Sadece eşyalar için tıklamaya izin ver
         }
 
         if (clicked.getType() == Material.BARRIER) {
@@ -129,7 +141,6 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
         if (!(e.getPlayer() instanceof Player p)) return;
         if (!e.getView().getTitle().equals("§8§l» §6§lEŞYA SAT §8§l«")) return;
 
-        // Menü kapatıldığında içeride kalan eşyaları oyuncuya iade et
         Inventory inv = e.getInventory();
         for (int i = 0; i < 45; i++) { 
             ItemStack item = inv.getItem(i);
@@ -146,22 +157,19 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
         int satilanEsyaSayisi = 0;
         boolean degerliEsyaVar = false;
 
-        // Menüdeki eşyaları tara
         for (int i = 0; i < 45; i++) {
             ItemStack item = satisEnv.getItem(i);
             if (item != null && item.getType() != Material.AIR) {
                 String esyaIsmi = item.getType().name();
                 
-                // fiyatlar.yml'den eşyanın fiyatını çek
                 double birimFiyat = fiyatYml.getDouble("fiyatlar." + esyaIsmi, 0.0);
                 
                 if (birimFiyat > 0) {
                     toplamPara += (birimFiyat * item.getAmount());
                     satilanEsyaSayisi += item.getAmount();
-                    satisEnv.setItem(i, null); // Eşyayı sil
+                    satisEnv.setItem(i, null);
                     degerliEsyaVar = true;
                 } else {
-                    // Fiyatı olmayan eşyayı iade et
                     p.sendMessage("§c" + esyaIsmi + " eşyasının satış fiyatı yok, iade edildi.");
                     HashMap<Integer, ItemStack> kalanlar = p.getInventory().addItem(item);
                     for (ItemStack kalan : kalanlar.values()) p.getWorld().dropItemNaturally(p.getLocation(), kalan);
@@ -176,7 +184,6 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
             return;
         }
 
-        // Parayı Vault üzerinden yatır
         if (econ != null) {
             econ.depositPlayer(p, toplamPara);
         }
@@ -184,9 +191,8 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
         p.sendMessage("§a§l✔ §aBaşarıyla §e" + satilanEsyaSayisi + " §aadet eşya sattın!");
         p.sendMessage("§7Hesabına eklenen para: §e" + toplamPara + " TL");
         
-        // Premium Efektler
+        // DÜZELTME: Title (Ekranın ortasına gelen yazı) kaldırıldı.
         p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
-        p.sendTitle("§a§lSATIŞ BAŞARILI", "§7Kazandığın: §e" + toplamPara + " TL", 10, 50, 10);
         
         for (int i = 0; i < 20; i++) {
             p.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, p.getLocation().add(0, 1, 0), 1, 0.5, 0.5, 0.5, 0);
@@ -194,4 +200,4 @@ public class SellPlugin extends JavaPlugin implements CommandExecutor, Listener 
 
         p.closeInventory();
     }
-  }
+}
